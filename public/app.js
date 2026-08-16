@@ -1,15 +1,28 @@
 const $ = (s) => document.querySelector(s);
 
 // ============ 数据层：调用自己的后端 API（数据存在服务器，不依赖任何第三方） ============
+// 统一的请求封装：非 2xx 时把后端返回的错误信息抛出来，避免吞掉真实原因
 const api = {
-  getRoom:    (id)    => fetch(`/api/rooms/${id}`).then(r=>r.json()).then(d=>d.room),
-  createRoom: (title) => fetch('/api/rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})}).then(r=>r.json()),
-  join:       (id,name)=> fetch(`/api/rooms/${id}/participants`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}).then(r=>r.json()),
-  addEvent:   (id,ev)  => fetch(`/api/rooms/${id}/events`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ev)}).then(r=>r.json()).then(d=>d.room),
-  updateEvent:(id,eid,ev)=> fetch(`/api/rooms/${id}/events/${eid}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(ev)}).then(r=>r.json()).then(d=>d.room),
-  deleteEvent:(id,eid,pid)=> fetch(`/api/rooms/${id}/events/${eid}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid})}).then(r=>r.json()).then(d=>d.room),
-  respond:    (id,eid,pid,status)=> fetch(`/api/rooms/${id}/events/${eid}/respond`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid,status})}).then(r=>r.json()).then(d=>d.room),
-  setRoom:    (id,body)=> fetch(`/api/rooms/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json()).then(d=>d.room),
+  _req: async (url, opts) => {
+    let r;
+    try { r = await fetch(url, opts); }
+    catch (e) { throw new Error('网络异常，请检查连接后重试'); }
+    let data = null;
+    try { data = await r.json(); } catch (e) { /* 非 JSON（如 500 页面）*/ }
+    if (!r.ok) {
+      const msg = (data && (data.error || data.message)) || `请求失败（${r.status}）`;
+      throw new Error(msg);
+    }
+    return data;
+  },
+  getRoom:    (id)    => api._req(`/api/rooms/${id}`).then(d=>d.room),
+  createRoom: (title) => api._req('/api/rooms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})}),
+  join:       (id,name)=> api._req(`/api/rooms/${id}/participants`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}),
+  addEvent:   (id,ev)  => api._req(`/api/rooms/${id}/events`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ev)}).then(d=>d.room),
+  updateEvent:(id,eid,ev)=> api._req(`/api/rooms/${id}/events/${eid}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(ev)}).then(d=>d.room),
+  deleteEvent:(id,eid,pid)=> api._req(`/api/rooms/${id}/events/${eid}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid})}).then(d=>d.room),
+  respond:    (id,eid,pid,status)=> api._req(`/api/rooms/${id}/events/${eid}/respond`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({pid,status})}).then(d=>d.room),
+  setRoom:    (id,body)=> api._req(`/api/rooms/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(d=>d.room),
 };
 const cacheRoom = () => { try { localStorage.setItem('ms_room_' + roomId, JSON.stringify(room)); } catch (e) {} };
 const loadCache = () => { try { return JSON.parse(localStorage.getItem('ms_room_' + roomId)); } catch (e) { return null; } };
@@ -500,7 +513,11 @@ function readRepeat(){
 async function saveEvent(){
   if(!myPid){ toast('请先填写名字'); return; }
   const title=$('#ev-title').value.trim()||'日程';
-  const date=$('#ev-date').value, start=$('#ev-start').value, end=$('#ev-end').value;
+  // 日期/时间兜底：手机上若被清空或格式异常，给默认值，避免后端返回「日期非法/时间非法」
+  let date=$('#ev-date').value;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) date=fmtDate(new Date());
+  let start=$('#ev-start').value || '09:00';
+  let end=$('#ev-end').value || '10:00';
   // 行程类型：所有人可见 → 不邀请（inviteTo=null）；邀请特定人 → 选中的 pid
   const visRadios = $('#ev-vis-opts').querySelectorAll('input[name=ev-vis]');
   const vis = [...visRadios].find(r => r.checked)?.value || 'public';
@@ -513,15 +530,21 @@ async function saveEvent(){
   const repeat=readRepeat();
   // 编辑已有事件时也要带 inviteTo（即使是 null，让后端能区分"清空邀请"和"未改"）
   const payload={ pid:myPid, title, date, start, end, inviteTo, shade:curShade, confirm:curConfirm, repeat };
+  const doSave = () => editingId ? api.updateEvent(roomId,editingId,payload) : api.addEvent(roomId,payload);
   try{
-    if(editingId){ room=await api.updateEvent(roomId,editingId,payload); }
-    else { room=await api.addEvent(roomId,payload); }
+    // 网络抖动时自动重试一次
+    let lastErr;
+    for(let attempt=0; attempt<2; attempt++){
+      try{ room=await doSave(); break; }
+      catch(e){ lastErr=e; if(!/网络异常/.test(e.message)) throw e; await new Promise(r=>setTimeout(r,800)); }
+    }
+    if(!room) throw lastErr || new Error('保存失败');
     closeModal(); render(); toast('已保存');
-  }catch(e){ toast('保存失败，请重试'); }
+  }catch(e){ toast('保存失败：' + (e.message || '请重试')); }
 }
 async function deleteEvent(){
   try{ room=await api.deleteEvent(roomId,editingId,myPid); closeModal(); render(); toast('已删除'); }
-  catch(e){ toast('删除失败'); }
+  catch(e){ toast('删除失败：' + (e.message || '请重试')); }
 }
 
 // ---------- 月份导航 ----------
