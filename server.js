@@ -12,17 +12,58 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- 存储层 ----------
+// 有 DATABASE_URL 就持久化到 Postgres（部署到 Render 时自动挂免费 PG，数据永久不丢）；
+// 没有则退回本地文件（本地开发用）。两种模式逻辑一致，只是落盘位置不同。
+const USE_DB = !!process.env.DATABASE_URL;
+let pool = null;
+if (USE_DB) {
+  const { Pool } = require('pg');
+  pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+}
 let rooms = {};
 let saveTimer = null;
+
+async function initDB() {
+  if (!pool) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS rooms (
+    id TEXT PRIMARY KEY,
+    data JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+}
+
 async function loadRooms() {
+  if (pool) {
+    try {
+      const { rows } = await pool.query('SELECT id, data FROM rooms');
+      rooms = {};
+      for (const r of rows) rooms[r.id] = r.data;
+      return;
+    } catch (e) { console.error('从数据库加载失败，回退为空：', e.message); rooms = {}; return; }
+  }
   try { rooms = JSON.parse(await fsp.readFile(DATA_FILE, 'utf8') || '{}'); }
   catch (e) { rooms = {}; }
 }
+
+// 把整个 rooms 对象写入存储。DB 模式下每个 room upsert 一行（用 jsonb 整个存，结构零改动）。
+async function persist() {
+  if (pool) {
+    for (const id of Object.keys(rooms)) {
+      await pool.query(
+        'INSERT INTO rooms (id, data, updated_at) VALUES ($1,$2,now()) ON CONFLICT (id) DO UPDATE SET data=$2, updated_at=now()',
+        [id, JSON.stringify(rooms[id])]
+      );
+    }
+    return;
+  }
+  await fsp.writeFile(DATA_FILE, JSON.stringify(rooms, null, 2));
+}
+
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(async () => {
     saveTimer = null;
-    try { await fsp.writeFile(DATA_FILE, JSON.stringify(rooms, null, 2)); } catch (e) {}
+    try { await persist(); } catch (e) { console.error('保存失败：', e.message); }
   }, 300);
 }
 
@@ -164,4 +205,8 @@ app.put('/api/rooms/:id/events/:eid/respond', (req, res) => {
   scheduleSave(); res.json({ room: r });
 });
 
-(async () => { await loadRooms(); app.listen(PORT, () => console.log(`MeetScheduler 运行在 http://localhost:${PORT}`)); })();
+(async () => {
+  await initDB();
+  await loadRooms();
+  app.listen(PORT, () => console.log(`MeetScheduler 运行在 http://localhost:${PORT}（存储：${USE_DB ? 'Postgres 数据库' : '本地文件'}）`));
+})();
