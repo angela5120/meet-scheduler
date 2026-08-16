@@ -147,6 +147,32 @@
         <label>开始<input id="ev-start" type="time" value="09:00" /></label>
         <label>结束<input id="ev-end" type="time" value="10:00" /></label>
       </div>
+      <label id="ev-confirm-wrap">状态（实线=已确定 / 虚线=待定，可能改）
+        <div class="seg" id="ev-confirm-seg">
+          <button type="button" class="seg-b on" data-v="confirmed">已确定</button>
+          <button type="button" class="seg-b" data-v="tentative">待定</button>
+        </div>
+      </label>
+      <label>类别颜色（同色系深浅区分不同事物）
+        <div class="shades" id="ev-shades"></div>
+      </label>
+      <label>重复
+        <select id="ev-repeat-type">
+          <option value="none">不重复</option>
+          <option value="weekly">每周（选周几循环）</option>
+          <option value="monthly">每月（选几号循环）</option>
+        </select>
+        <div class="wk-days hidden" id="ev-weekly">
+          <button type="button" data-d="1">一</button>
+          <button type="button" data-d="2">二</button>
+          <button type="button" data-d="3">三</button>
+          <button type="button" data-d="4">四</button>
+          <button type="button" data-d="5">五</button>
+          <button type="button" data-d="6">六</button>
+          <button type="button" data-d="0">日</button>
+        </div>
+        <select id="ev-monthly" class="hidden"></select>
+      </label>
       <label>作为邀请发给
         <select id="ev-invite">
           <option value="">不邀请（仅自己可见的日程）</option>

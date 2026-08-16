@@ -27,7 +27,8 @@ function scheduleSave() {
 }
 
 // ---------- 工具 ----------
-const PALETTE = ['#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+// 每个参与者分配一个基础色相（hue），在自己的色系内用深/中/浅区分类别
+const HUES = [210, 265, 330, 25, 150, 195, 285, 350, 130, 45];
 const HOURS = []; for (let h = 7; h <= 23; h++) HOURS.push(h); // 7:00 - 23:00
 function genId(n) {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -71,11 +72,12 @@ app.post('/api/rooms/:id/participants', (req, res) => {
   if (!r) return res.status(404).json({ error: '房间不存在' });
   const name = (req.body.name || '匿名').toString().slice(0, 24);
   const pid = genPid();
-  const used = Object.values(r.participants).map(p => p.color);
-  const color = PALETTE.find(c => !used.includes(c)) || PALETTE[Object.keys(r.participants).length % PALETTE.length];
-  r.participants[pid] = { pid, name, color };
+  const used = Object.values(r.participants).map(p => p.hue);
+  let hue = HUES.find(h => !used.includes(h));
+  if (hue === undefined) hue = HUES[Object.keys(r.participants).length % HUES.length];
+  r.participants[pid] = { pid, name, hue };
   scheduleSave();
-  res.json({ pid, color, room: r });
+  res.json({ pid, hue, room: r });
 });
 
 app.put('/api/rooms/:id/participants/:pid', (req, res) => {
@@ -86,6 +88,19 @@ app.put('/api/rooms/:id/participants/:pid', (req, res) => {
 });
 
 // 事件：owner 添加自己的日程；inviteTo 非空则为"邀请事件"
+// 字段：shade(0深/1中/2浅) 区分类别，confirm(busy 用：confirmed 实线 / tentative 虚线)，repeat 重复规则
+function parseRepeat(rep) {
+  if (!rep || typeof rep !== 'object') return null;
+  if (rep.type === 'weekly' && Array.isArray(rep.days)) {
+    const days = rep.days.filter(d => Number.isInteger(d) && d >= 0 && d <= 6).slice(0, 7);
+    if (days.length === 0) return null;
+    return { type: 'weekly', days };
+  }
+  if (rep.type === 'monthly' && Number.isInteger(rep.dom) && rep.dom >= 1 && rep.dom <= 31) {
+    return { type: 'monthly', dom: rep.dom };
+  }
+  return null;
+}
 app.post('/api/rooms/:id/events', (req, res) => {
   const r = rooms[req.params.id]; if (!r) return res.status(404).json({ error: '房间不存在' });
   const { pid, title, date, start, end, inviteTo } = req.body;
@@ -93,14 +108,18 @@ app.post('/api/rooms/:id/events', (req, res) => {
   if (!validTime(start) || !validTime(end) || start >= end) return res.status(400).json({ error: '时间非法' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '日期非法' });
   if (inviteTo && inviteTo !== 'all' && !r.participants[inviteTo]) return res.status(400).json({ error: '邀请对象不存在' });
+  const shade = [0, 1, 2].includes(req.body.shade) ? req.body.shade : 1;
+  const confirm = req.body.confirm === 'tentative' ? 'tentative' : 'confirmed';
+  const repeat = parseRepeat(req.body.repeat);
   const eid = genId(8);
   const ev = {
-    id: eid, owner: pid, ownerName: p.name, color: p.color,
+    id: eid, owner: pid, ownerName: p.name, hue: p.hue,
     title: (title || '日程').toString().slice(0, 40),
     date, start, end,
     kind: inviteTo ? 'invite' : 'busy',
     inviteTo: inviteTo || null,
     status: inviteTo ? 'pending' : 'confirmed',
+    confirm, shade, repeat,
     note: (req.body.note || '').toString().slice(0, 200),
   };
   r.events.push(ev); scheduleSave(); res.json({ room: r });
@@ -116,6 +135,9 @@ app.put('/api/rooms/:id/events/:eid', (req, res) => {
   if (start !== undefined && validTime(start)) ev.start = start;
   if (end !== undefined && validTime(end)) ev.end = end;
   if (ev.start >= ev.end) return res.status(400).json({ error: '结束时间必须晚于开始' });
+  if (req.body.shade !== undefined && [0, 1, 2].includes(req.body.shade)) ev.shade = req.body.shade;
+  if (req.body.confirm === 'tentative' || req.body.confirm === 'confirmed') ev.confirm = req.body.confirm;
+  if (req.body.repeat !== undefined) ev.repeat = parseRepeat(req.body.repeat);
   scheduleSave(); res.json({ room: r });
 });
 

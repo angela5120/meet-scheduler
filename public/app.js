@@ -24,7 +24,7 @@ async function poll() {
     const sig = sigOf(r);
     if (sig !== lastSig) {
       lastSig = sig; room = r; cacheRoom();
-      if (myPid && room.participants[myPid]) $('#me-name').textContent = room.participants[myPid].name;
+      if (myPid && room.participants[myPid]) updateMeChip();
       render();
     }
   } catch (e) {}
@@ -40,21 +40,44 @@ const fmtHM = (h) => `${pad(Math.floor(h))}:${pad(Math.round((h%1)*60))}`;
 const toFloat = (hm) => { const [h,m] = hm.split(':').map(Number); return h + m/60; };
 const weekdayShort = (d) => WEEKDAY[new Date(d+'T00:00:00').getDay()];
 const toast = (m) => { const t=$('#toast'); t.textContent=m; t.classList.remove('hidden'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.add('hidden'),2200); };
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-// 农历（1900-2100 简化查表，覆盖常见年份；够用了）
-const LUNAR_INFO=['金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金','金'];
-const LUNAR_MONTH=['正','二','三','四','五','六','七','八','九','十','冬','腊'];
-const LUNAR_DAY=['初','十','廿','三十'];
-// 简化：用查询一个万年历表，避免引入大表。这里用最常见的"节气/节日"近似：直接显示当月农历按序号（够用：日期显示）。
-// 实际我们用一层轻量查表（仅显示日期的大致，错误不影响主体功能）
-function lunarDaySimple(date){
-  // 简化：取一个基准日（2024-01-01 是农历 冬月二十），按 354.367 天平均月长计算；超出农历月份的近似值即可。生产可换真农历库。
-  const base=new Date('2024-01-01T00:00:00');
-  const diff=Math.floor((date.getTime()-base.getTime())/(1000*60*60*24));
-  const offset=(diff+20)%30; // 冬月二十=基准
-  const m=(((Math.floor((diff+20)/30)+11)%12));
-  const d=offset%30;
-  return LUNAR_MONTH[m]+'月'+(d<10?'初':d<20?'十':d<30?'廿':'三十')+'⺁'+(d%10===0?'十':(d%10));
+// 色系：每个参与者一个基础色相(hue)，在色系内分 深/中/浅 三档区分类别
+// bg=实色（确定事项），bgSoft=半透明（待定/虚线事项，仍保留色相深浅区分）
+function shadeSet(hue){
+  return [
+    { bg:`hsl(${hue} 58% 42%)`, bgSoft:`hsl(${hue} 58% 42% / .30)`, text:'#fff',                     border:`hsl(${hue} 55% 34%)` }, // 0 深
+    { bg:`hsl(${hue} 62% 58%)`, bgSoft:`hsl(${hue} 62% 58% / .32)`, text:'#fff',                     border:`hsl(${hue} 55% 48%)` }, // 1 中
+    { bg:`hsl(${hue} 70% 84%)`, bgSoft:`hsl(${hue} 70% 84% / .55)`, text:`hsl(${hue} 55% 28%)`,      border:`hsl(${hue} 50% 66%)` }, // 2 浅
+  ];
+}
+function ownerHue(ev){ return (ev.hue!=null) ? ev.hue : (room.participants[ev.owner]?.hue ?? 210); }
+function evShade(ev){ const s=[0,1,2].includes(ev.shade)?ev.shade:1; return shadeSet(ownerHue(ev))[s]; }
+// 实线 / 虚线 语义：实线=已确定；虚线=待定(可能改) 或 对方尚未同意的邀请
+function isSolid(ev){
+  if(ev.kind==='invite') return ev.status==='accepted';
+  return ev.confirm !== 'tentative';
+}
+
+// 重复展开：返回某天应当显示的事件（含 repeat 展开的副本，副本带 eid=主事件id）
+function displayEventsOn(ds){
+  const out=[];
+  const date=new Date(ds+'T00:00:00');
+  const dow=date.getDay();        // 0=周日 .. 6=周六
+  const dom=date.getDate();
+  for(const ev of room.events){
+    if(!visible.has(ev.owner)) continue;
+    if(ev.repeat){
+      let hit=false;
+      if(ev.repeat.type==='weekly') hit=ev.repeat.days.includes(dow);
+      else if(ev.repeat.type==='monthly') hit=(ev.repeat.dom===dom);
+      if(hit) out.push({...ev, date:ds, eid:ev.id});
+    } else if(ev.date===ds){
+      out.push({...ev, eid:ev.id});
+    }
+  }
+  out.sort((a,b)=>toFloat(a.start)-toFloat(b.start));
+  return out;
 }
 
 let roomId=null, room=null, myPid=null, pollTimer=null;
@@ -62,9 +85,10 @@ let rangeStart=new Date(); rangeStart.setHours(0,0,0,0);
 let rangeDays=7;
 let visible=new Set();
 let editingId=null;
-let view='month';            // 当前视图：month / week / agenda
-let viewMonth=new Date();    // 当前月视图显示的月份（任意一天即可）
-viewMonth.setDate(1); viewMonth.setHours(0,0,0,0);
+let view='month';            // month / week / agenda
+let viewMonth=new Date(); viewMonth.setDate(1); viewMonth.setHours(0,0,0,0);
+// 弹窗当前选择（打开时初始化）
+let curConfirm='confirmed', curShade=1, curRepeatType='none';
 
 // ---------- 首页 ----------
 function showHome(){ $('#home').classList.remove('hidden'); $('#room').classList.add('hidden'); }
@@ -98,19 +122,28 @@ async function enterRoom(id){
   $('#share-link').value=location.origin+location.pathname+'?room='+id;
   myPid=localStorage.getItem('ms_pid_'+id);
   if(!myPid||!room.participants[myPid]){ $('#name-prompt').classList.remove('hidden'); $('#me-name').textContent='—'; }
-  else { $('#name-prompt').classList.add('hidden'); $('#me-name').textContent=room.participants[myPid].name; }
+  else { $('#name-prompt').classList.add('hidden'); updateMeChip(); }
   visible=new Set(Object.keys(room.participants));
   rangeStart=new Date(); rangeStart.setHours(0,0,0,0);
   rangeDays=[7,14,30].includes(room.dayCount)?room.dayCount:7;
   $('#range-start').value=fmtDate(rangeStart);
   $('#range-days').value=String(rangeDays);
   initTz();
-  // 月视图默认本月（不是从今天开始的 0 点，而是 1 号）
   const t=new Date(); t.setHours(0,0,0,0);
   viewMonth=new Date(t.getFullYear(), t.getMonth(), 1);
   render();
   if(pollTimer) clearInterval(pollTimer);
   pollTimer=setInterval(poll,3000);
+}
+// 把"我是：xxx"的色块染成我的专属色系深档
+function updateMeChip(){
+  const p=room.participants[myPid];
+  if(!p) return;
+  const sh=shadeSet(p.hue)[0];
+  $('#me-name').textContent=p.name;
+  $('#me-name').style.background=sh.bg;
+  $('#me-name').style.color=sh.text;
+  $('#me-name').style.borderColor=sh.border;
 }
 $('#btn-copy').onclick=()=>{ navigator.clipboard.writeText($('#share-link').value).then(()=>toast('链接已复制，去发给朋友吧')).catch(()=>toast('复制失败，请手动选择')); };
 $('#btn-leave').onclick=()=>{ localStorage.removeItem('ms_pid_'+roomId); location.reload(); };
@@ -121,7 +154,7 @@ $('#btn-setname').onclick=async()=>{
     myPid=d.pid;
     localStorage.setItem('ms_pid_'+roomId,myPid);
     room=d.room;
-    $('#name-prompt').classList.add('hidden'); $('#me-name').textContent=n;
+    $('#name-prompt').classList.add('hidden'); updateMeChip();
     visible=new Set(Object.keys(room.participants)); render();
   }catch(e){ toast('加入失败，请重试'); }
 };
@@ -155,28 +188,23 @@ document.querySelectorAll('.view-tab').forEach(b=>b.onclick=()=>switchView(b.dat
 // ---------- 渲染 ----------
 function render(){ renderPeople(); renderCalendar(); renderFree(); renderInvites(); if(view==='agenda') renderAgenda(); }
 
-// 月历工作台
+// ---------- 月历工作台 ----------
 function renderCalendar(){
   if(view==='month'){ renderMonth(); return; }
   if(view==='week'){  renderWeek();  return; }
 }
-
-// 月份范围：含上下月补齐 6 行 × 7 列 = 42 天
 function monthGridDays(){
   const y=viewMonth.getFullYear(), m=viewMonth.getMonth();
   const first=new Date(y,m,1);
-  // 周一为一周开始：getDay() 0=Sun..6=Sat；转成 Mon-Sun 的偏移
-  const dow=(first.getDay()+6)%7;
+  const dow=(first.getDay()+6)%7;                       // 周一开头
   const start=new Date(y,m,1-dow);
   return { y, m, days:Array.from({length:42},(_,i)=>{ const d=new Date(start); d.setDate(start.getDate()+i); return d; }) };
 }
 function renderMonth(){
   const { y, m, days } = monthGridDays();
   $('#cal-month-label').textContent = `${y}年${m+1}月`;
-  // 农历 / 节假日仅在标题外围给 viewMonth 第一天附一次说明
   const todayStr=fmtDate(new Date());
   let html='';
-  // 每个 cell：日期（大）、农历/节假日（小）、下方堆叠事件标签
   for(const d of days){
     const inMonth = d.getMonth()===m;
     const ds=fmtDate(d);
@@ -187,67 +215,50 @@ function renderMonth(){
     if(wd===6) cls.push('sat');
     if(wd===0) cls.push('sun');
     if(isToday) cls.push('today');
-    // 当天事件，按可见人过滤
-    const dayEvents=room.events
-      .filter(e=>e.date===ds && visible.has(e.owner))
-      .sort((a,b)=>toFloat(a.start)-toFloat(b.start));
-    // 简单农历（一行小字）
-    const lunar = `${LUNAR_MONTH[d.getMonth()]}月`;
+    const dayEvents=displayEventsOn(ds);
     let tagsHtml='';
     const MAX=4;
-    for(let i=0;i<Math.min(MAX,dayEvents.length);i++){
-      tagsHtml += monthTag(dayEvents[i]);
-    }
-    if(dayEvents.length>MAX){
-      tagsHtml += `<span class="tag-more" data-more="${ds}">+${dayEvents.length-MAX}</span>`;
-    }
+    for(let i=0;i<Math.min(MAX,dayEvents.length);i++) tagsHtml += monthTag(dayEvents[i]);
+    if(dayEvents.length>MAX) tagsHtml += `<span class="tag-more" data-more="${ds}">+${dayEvents.length-MAX}</span>`;
     html += `<div class="${cls.join(' ')}" data-d="${ds}">
-      <div class="mcell-head">
-        <span class="mcell-day">${d.getDate()}</span>
-        <span class="mcell-lunar">${WEEKDAY_MIN[wd]}</span>
-      </div>
-      <div class="mcell-tags">${tagsHtml||''}</div>
+      <div class="mcell-head"><span class="mcell-day">${d.getDate()}</span><span class="mcell-week">${WEEKDAY_MIN[wd]}</span></div>
+      <div class="mcell-tags">${tagsHtml}</div>
     </div>`;
   }
   $('#month-grid').innerHTML=html;
-
-  // 绑定：cell 空白处点击 → 新建日程；tag 点击 → 编辑；more 点击 → 视图切到日程列表（且起始日）
   $('#month-grid').querySelectorAll('.mcell').forEach(c=>{
-    c.onclick=(e)=>{
-      if(e.target.classList.contains('tag')||e.target.classList.contains('tag-more')) return;
-      openModal(c.dataset.d, 9);
-    };
+    c.onclick=(e)=>{ if(e.target.classList.contains('tag')||e.target.classList.contains('tag-more')) return; openModal(c.dataset.d, 9); };
   });
   $('#month-grid').querySelectorAll('.tag').forEach(t=>{
-    t.onclick=(e)=>{
-      e.stopPropagation();
+    t.onclick=(e)=>{ e.stopPropagation();
       const ev=room.events.find(x=>x.id===t.dataset.id);
       if(ev) openModal(ev.date, null, ev);
     };
   });
-  $('#month-grid').querySelectorAll('.tag-more').forEach(m=>{
-    m.onclick=(e)=>{ e.stopPropagation();
-      rangeStart=new Date(m.dataset.more+'T00:00:00');
-      rangeDays=7; $('#range-start').value=fmtDate(rangeStart); $('#range-days').value='7';
+  $('#month-grid').querySelectorAll('.tag-more').forEach(mo=>{
+    mo.onclick=(e)=>{ e.stopPropagation();
+      rangeStart=new Date(mo.dataset.more+'T00:00:00'); rangeDays=7;
+      $('#range-start').value=fmtDate(rangeStart); $('#range-days').value='7';
       switchView('agenda');
     };
   });
 }
 function monthTag(ev){
+  const sh=evShade(ev);
+  const isTent = ev.kind==='busy' && ev.confirm==='tentative';
+  const bg = isTent ? sh.bgSoft : sh.bg;
+  const bd = isSolid(ev) ? `1px solid ${sh.border}` : `1.5px dashed ${sh.border}`;
   let cls='tag';
-  if(ev.kind==='invite') cls+=' invite';
-  if(ev.status==='accepted') cls+=' accepted';
+  if(!isSolid(ev)) cls+=' dash';
   const iAmInvitee = ev.kind==='invite'&&(ev.inviteTo===myPid||ev.inviteTo==='all');
   if(ev.kind==='invite'&&ev.status==='pending'&&iAmInvitee) cls+=' pending-me';
-  const c = ev.color||'#3b82f6';
-  return `<div class="${cls}" data-id="${ev.id}" style="background:${c}22;border-color:${c}cc;color:${c}">
-    <span class="tag-t">${escapeHtml(ev.title)}</span>
-    <span class="tag-c">${ev.start}</span>
-  </div>`;
+  if(ev.kind==='invite'&&ev.status==='accepted') cls+=' accepted-ring';
+  const mark = ev.kind==='invite'?(ev.status==='accepted'?' ✓':'(待回应)'):(isTent?' ·待定':'');
+  return `<div class="${cls}" data-id="${ev.eid||ev.id}" style="background:${bg};border:${bd};color:${sh.text}">
+    <span class="tag-t">${escapeHtml(ev.title)}${mark}</span><span class="tag-c">${ev.start}</span></div>`;
 }
-function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-// 周视图（时间轴）
+// ---------- 周视图（时间轴）----------
 function renderWeek(){
   const days=rangeDaysList();
   $('#week-label').textContent=`${days[0].slice(5)} ~ ${days[days.length-1].slice(5)} · 共${days.length}天 · ${room.tz||'时区'}`;
@@ -260,9 +271,7 @@ function renderWeek(){
     const isToday=d===todayStr?' today':'';
     cols+=`<div class="day-col"><div class="day-head${isToday}"><span class="dh-d">${d.slice(5)}</span><span class="dh-w">${weekdayShort(d)}</span></div><div class="day-body" data-d="${d}">`;
     for(let h=HOUR_START;h<HOUR_END;h++) cols+=`<div class="hour-line"></div>`;
-    for(const ev of room.events){
-      if(ev.date!==d) continue;
-      if(!visible.has(ev.owner)) continue;
+    for(const ev of displayEventsOn(d)){
       const s=Math.max(toFloat(ev.start),HOUR_START), e=Math.min(toFloat(ev.end),HOUR_END);
       if(e<=s) continue;
       const top=(s-HOUR_START)*ROWH, hgt=(e-s)*ROWH;
@@ -273,77 +282,73 @@ function renderWeek(){
   $('#calendar').innerHTML=axis+cols;
   $('#calendar').querySelectorAll('.day-body').forEach(db=>{
     db.onclick=(ev)=>{ if(ev.target.classList.contains('day-body')||ev.target.classList.contains('hour-line')){
-      const rect=db.getBoundingClientRect(); const y=ev.clientY-rect.top;
-      const hr=HOUR_START+Math.floor(y/ROWH);
-      openModal(db.dataset.d, hr);
+      const rect=db.getBoundingClientRect(); const y=ev.clientY-rect.top; const hr=HOUR_START+Math.floor(y/ROWH); openModal(db.dataset.d, hr);
     } };
   });
   $('#calendar').querySelectorAll('.event').forEach(el=>{
-    el.onclick=(ev)=>{ ev.stopPropagation(); const id=el.dataset.id; const e=room.events.find(x=>x.id===id);
-      if(e&&e.owner===myPid&&e.kind==='busy') openModal(e.date, null, e);
+    el.onclick=(ev)=>{ ev.stopPropagation(); const ev2=room.events.find(x=>x.id===el.dataset.id);
+      if(ev2&&ev2.owner===myPid&&ev2.kind==='busy') openModal(ev2.date, null, ev2);
     };
   });
 }
 function eventBlock(ev,top,hgt){
+  const sh=evShade(ev);
+  const isTent = ev.kind==='busy' && ev.confirm==='tentative';
+  const bg = isTent ? sh.bgSoft : sh.bg;
+  const bd = isSolid(ev) ? `1px solid ${sh.border}` : `1.5px dashed ${sh.border}`;
   let cls='event';
-  if(ev.kind==='invite') cls+=' invite';
-  if(ev.status==='accepted') cls+=' accepted';
-  if(ev.kind==='invite'&&ev.status==='pending'&&(ev.inviteTo===myPid||ev.inviteTo==='all')) cls+=' pending-me';
-  let actions='';
+  if(!isSolid(ev)) cls+=' dash';
   const iAmInvitee=ev.kind==='invite'&&(ev.inviteTo===myPid||ev.inviteTo==='all');
-  if(ev.status==='pending'&&iAmInvitee){
+  if(ev.kind==='invite'&&ev.status==='pending'&&iAmInvitee) cls+=' pending-me';
+  if(ev.kind==='invite'&&ev.status==='accepted') cls+=' accepted-ring';
+  let actions='';
+  if(ev.kind==='invite'&&ev.status==='pending'&&iAmInvitee){
     actions=`<div class="ev-actions"><button class="mini-a" data-act="accepted" data-id="${ev.id}">同意</button><button class="mini-d" data-act="declined" data-id="${ev.id}">拒绝</button></div>`;
   }
-  const tag=ev.kind==='invite'?(ev.status==='accepted'?'✓邀请':'⟳邀请'):'';
-  return `<div class="${cls}" data-id="${ev.id}" style="top:${top}px;height:${hgt}px;background:${ev.color}22;border-color:${ev.color}">
-    <div class="ev-t">${escapeHtml(ev.title)} ${tag}</div>
-    <div class="ev-o">${ev.start}-${ev.end} · ${escapeHtml(ev.ownerName)}</div>
-    ${actions}</div>`;
+  const tag=ev.kind==='invite'?(ev.status==='accepted'?'✓邀请':'⟳邀请'):(isTent?'·待定':'');
+  return `<div class="${cls}" data-id="${ev.id}" style="top:${top}px;height:${hgt}px;background:${bg};border:${bd};color:${sh.text}">
+    <div class="ev-t">${escapeHtml(ev.title)} ${tag}</div><div class="ev-o">${ev.start}-${ev.end} · ${escapeHtml(ev.ownerName)}</div>${actions}</div>`;
 }
 
-// 日程视图：按日期聚合，按可见人过滤
+// ---------- 日程视图 ----------
 function renderAgenda(){
   const days=rangeDaysList();
   $('#ag-label').textContent = `${days[0].slice(5)} ~ ${days[days.length-1].slice(5)} · ${room.tz||'时区'}`;
   const list=$('#agenda-list'); list.innerHTML='';
   let any=false;
   for(const d of days){
-    const evs=room.events
-      .filter(e=>e.date===d && visible.has(e.owner))
-      .sort((a,b)=>toFloat(a.start)-toFloat(b.start));
+    const evs=displayEventsOn(d);
     if(evs.length===0) continue;
     any=true;
     list.innerHTML += `<div class="agenda-day">${d.slice(5)} <span class="sub">${weekdayShort(d)}</span></div>`;
     for(const ev of evs){
-      list.innerHTML += `<div class="agenda-item" data-id="${ev.id}">
-        <span class="agenda-dot" style="background:${ev.color||'#3b82f6'}"></span>
+      const sh=evShade(ev);
+      const mark = ev.kind==='invite'?(ev.status==='accepted'?' ✓邀请':' ⟳邀请(待回应)'):(ev.confirm==='tentative'?' ·待定':'');
+      list.innerHTML += `<div class="agenda-item" data-id="${ev.eid||ev.id}">
+        <span class="agenda-dot" style="background:${sh.bg}"></span>
         <span class="agenda-time">${ev.start}–${ev.end}</span>
-        <span class="agenda-tit">${escapeHtml(ev.title)}${ev.kind==='invite'?(ev.status==='accepted'?'  ✓邀请':'  ⟳邀请'):''}</span>
-        <span class="agenda-meta">${escapeHtml(ev.ownerName)}</span>
-      </div>`;
+        <span class="agenda-tit" style="color:${sh.text}">${escapeHtml(ev.title)}${mark}</span>
+        <span class="agenda-meta">${escapeHtml(ev.ownerName)}</span></div>`;
     }
   }
   if(!any) list.innerHTML = '<div class="agenda-empty">这段时间还没有可见的日程</div>';
   list.querySelectorAll('.agenda-item').forEach(el=>{
-    el.onclick=()=>{ const ev=room.events.find(x=>x.id===el.dataset.id);
-      if(ev) openModal(ev.date, null, ev);
-    };
+    el.onclick=()=>{ const ev=room.events.find(x=>x.id===el.dataset.id); if(ev) openModal(ev.date, null, ev); };
   });
 }
 
+// ---------- 人员显隐 ----------
 function renderPeople(){
-  // 同时渲染给 week 和 agenda 视图的工具栏（两份）。简化：用一份 put 到第一个 people-toggles，并镜像。
   const src=`<button class="ghost small" id="only-me">仅看我</button><button class="ghost small" id="only-all">全部</button>`;
   let parts='';
   for(const p of Object.values(room.participants)){
     const off=!visible.has(p.pid)?' off':'';
-    parts += `<span class="ptoggle${off}" data-pid="${p.pid}"><i class="sw" style="background:${p.color}"></i>${escapeHtml(p.name)}</span>`;
+    const sw=shadeSet(p.hue)[0].bg;
+    parts += `<span class="ptoggle${off}" data-pid="${p.pid}"><i class="sw" style="background:${sw}"></i>${escapeHtml(p.name)}</span>`;
   }
   const html = src+parts;
   $('#people-toggles').innerHTML = html;
-  // 日程视图也镜像一份
   const mirror=$('#people-toggles-2'); if(mirror) mirror.innerHTML=html;
-  // 绑定
   [['#people-toggles'],['#people-toggles-2']].forEach(([sel])=>{
     const box=$(sel); if(!box) return;
     box.querySelector('#only-me')?.addEventListener('click',()=>{ if(myPid){ visible=new Set([myPid]); render(); } });
@@ -354,16 +359,14 @@ function renderPeople(){
   });
 }
 
+// ---------- 共同空闲 ----------
+function isOccupy(ev){ if(ev.kind==='invite') return ev.status==='accepted'; return true; } // busy(含待定) 都算占用；pending 邀请不算
 function renderFree(){
   const days=rangeDaysList(); const box=$('#free-list'); box.innerHTML='';
   let any=false;
   for(const d of days){
     const blocks=[];
-    for(const ev of room.events){
-      if(ev.date!==d||!visible.has(ev.owner)) continue;
-      if(ev.kind==='busy'||(ev.kind==='invite'&&ev.status==='accepted'))
-        blocks.push([toFloat(ev.start),toFloat(ev.end)]);
-    }
+    for(const ev of displayEventsOn(d)){ if(isOccupy(ev)) blocks.push([toFloat(ev.start),toFloat(ev.end)]); }
     blocks.sort((a,b)=>a[0]-b[0]);
     const free=[]; let cur=HOUR_START;
     for(const [s,e] of blocks){ if(s>cur) free.push([cur,Math.min(s,HOUR_END)]); cur=Math.max(cur,e); }
@@ -374,6 +377,8 @@ function renderFree(){
   }
   if(!any && box.innerHTML==='') box.innerHTML='<span class="af-empty">还没有日程，添加后这里会显示共同空闲时段。</span>';
 }
+
+// ---------- 待回应邀请 ----------
 function renderInvites(){
   const box=$('#invites'); box.innerHTML='';
   const received=room.events.filter(e=>e.kind==='invite'&&e.status==='pending'&&(e.inviteTo===myPid||e.inviteTo==='all'));
@@ -395,17 +400,53 @@ function renderInvites(){
 }
 
 // ---------- 弹窗：添加/编辑事件 ----------
+function buildMonthlyOptions(){
+  let o=''; for(let i=1;i<=31;i++) o+=`<option value="${i}">每月 ${i} 号</option>`;
+  $('#ev-monthly').innerHTML=o;
+}
 function openModal(date, startHour, ev){
   editingId=ev?ev.id:null;
+  const isInvite = ev && ev.kind==='invite';
   $('#modal-title').textContent=ev?'编辑日程':'添加日程';
   $('#ev-title').value=ev?ev.title:'';
   $('#ev-date').value=ev?ev.date:date;
   $('#ev-start').value=ev?ev.start:(pad(startHour||9)+':00');
   $('#ev-end').value=ev?ev.end:(pad(Math.min((startHour||9)+1,HOUR_END))+':00');
-  const sel=$('#ev-invite'); sel.innerHTML='<option value="">不邀请（仅自己的日程）</option><option value="all">所有人</option>';
+  // 邀请对象
+  const sel=$('#ev-invite'); sel.innerHTML='<option value="">不邀请（仅自己可见的日程）</option><option value="all">所有人</option>';
   for(const p of Object.values(room.participants)) if(p.pid!==myPid) sel.innerHTML+=`<option value="${p.pid}">${escapeHtml(p.name)}</option>`;
-  sel.value=ev?(ev.inviteTo||''):'';
-  sel.disabled=!!ev;
+  sel.value=ev?(ev.inviteTo||''):''; sel.disabled=!!ev;
+  // 状态（仅普通日程显示；邀请由回应决定）
+  const confirmWrap=$('#ev-confirm-wrap');
+  if(confirmWrap) confirmWrap.classList.toggle('hidden', isInvite);
+  curConfirm = (ev && ev.kind!=='invite') ? (ev.confirm||'confirmed') : 'confirmed';
+  $('#ev-confirm-seg').querySelectorAll('.seg-b').forEach(x=>x.classList.toggle('on', x.dataset.v===curConfirm));
+  // 类别颜色（用我的色系预览三档）
+  const hue = (room.participants[myPid]?.hue ?? 210);
+  const ss=shadeSet(hue);
+  $('#ev-shades').innerHTML = ss.map((s,i)=>`<button type="button" class="shade-b" data-i="${i}" style="background:${s.bg};border-color:${s.border};color:${s.text}">${['深','中','浅'][i]}</button>`).join('');
+  curShade = (ev && [0,1,2].includes(ev.shade)) ? ev.shade : 1;
+  $('#ev-shades').querySelectorAll('.shade-b').forEach(x=>x.classList.toggle('on', Number(x.dataset.i)===curShade));
+  $('#ev-shades').querySelectorAll('.shade-b').forEach(b=>b.onclick=()=>{ curShade=Number(b.dataset.i);
+    $('#ev-shades').querySelectorAll('.shade-b').forEach(x=>x.classList.toggle('on', Number(x.dataset.i)===curShade)); });
+  $('#ev-confirm-seg').querySelectorAll('.seg-b').forEach(b=>b.onclick=()=>{ curConfirm=b.dataset.v;
+    $('#ev-confirm-seg').querySelectorAll('.seg-b').forEach(x=>x.classList.toggle('on', x.dataset.v===curConfirm)); });
+  // 重复
+  curRepeatType = ev && ev.repeat ? ev.repeat.type : 'none';
+  $('#ev-repeat-type').value=curRepeatType;
+  $('#ev-weekly').classList.toggle('hidden', curRepeatType!=='weekly');
+  $('#ev-monthly').classList.toggle('hidden', curRepeatType!=='monthly');
+  if(curRepeatType==='weekly' && ev.repeat){
+    $('#ev-weekly').querySelectorAll('button').forEach(b=>b.classList.toggle('on', ev.repeat.days.includes(Number(b.dataset.d))));
+  } else {
+    $('#ev-weekly').querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+  }
+  if(curRepeatType==='monthly' && ev.repeat){ $('#ev-monthly').value=String(ev.repeat.dom); }
+  $('#ev-repeat-type').onchange=()=>{ const t=$('#ev-repeat-type').value;
+    $('#ev-weekly').classList.toggle('hidden', t!=='weekly');
+    $('#ev-monthly').classList.toggle('hidden', t!=='monthly'); };
+  $('#ev-weekly').querySelectorAll('button').forEach(b=>b.onclick=()=>b.classList.toggle('on'));
+  // 操作按钮
   const actions=$('#modal-actions');
   if(ev){ actions.innerHTML=`<button class="ghost" id="ev-cancel">取消</button><button class="primary" id="ev-save">保存</button><button class="ghost small" id="ev-del" style="color:#ef4444;border-color:#ef4444">删除</button>`; }
   else { actions.innerHTML=`<button class="ghost" id="ev-cancel">取消</button><button class="primary" id="ev-save">保存</button>`; }
@@ -415,18 +456,24 @@ function openModal(date, startHour, ev){
   $('#modal').classList.remove('hidden');
 }
 function closeModal(){ $('#modal').classList.add('hidden'); editingId=null; }
+function readRepeat(){
+  const t=$('#ev-repeat-type').value;
+  if(t==='weekly'){ const days=[...$('#ev-weekly').querySelectorAll('button.on')].map(b=>Number(b.dataset.d));
+    if(days.length) return {type:'weekly',days}; }
+  if(t==='monthly'){ return {type:'monthly',dom:Number($('#ev-monthly').value)}; }
+  return null;
+}
 async function saveEvent(){
   if(!myPid){ toast('请先填写名字'); return; }
   const title=$('#ev-title').value.trim()||'日程';
   const date=$('#ev-date').value, start=$('#ev-start').value, end=$('#ev-end').value;
   const inviteTo=$('#ev-invite').value||null;
   if(start>=end) return toast('结束时间必须晚于开始');
+  const repeat=readRepeat();
+  const payload={ pid:myPid, title, date, start, end, inviteTo, shade:curShade, confirm:curConfirm, repeat };
   try{
-    if(editingId){
-      room=await api.updateEvent(roomId,editingId,{pid:myPid,title,date,start,end});
-    } else {
-      room=await api.addEvent(roomId,{pid:myPid,title,date,start,end,inviteTo});
-    }
+    if(editingId){ room=await api.updateEvent(roomId,editingId,payload); }
+    else { room=await api.addEvent(roomId,payload); }
     closeModal(); render(); toast('已保存');
   }catch(e){ toast('保存失败，请重试'); }
 }
@@ -438,39 +485,28 @@ async function deleteEvent(){
 // ---------- 月份导航 ----------
 $('#mo-prev').onclick=()=>{ viewMonth=new Date(viewMonth.getFullYear(), viewMonth.getMonth()-1, 1); renderCalendar(); };
 $('#mo-next').onclick=()=>{ viewMonth=new Date(viewMonth.getFullYear(), viewMonth.getMonth()+1, 1); renderCalendar(); };
-
-// 月份跳转
 $('#cal-pickmonth').onclick=()=>{
-  $('#mp-year').innerHTML = ''; $('#mp-month').innerHTML = '';
+  $('#mp-year').innerHTML=''; $('#mp-month').innerHTML='';
   const yr=viewMonth.getFullYear(), mo=viewMonth.getMonth();
   for(let i=yr-5;i<=yr+5;i++) $('#mp-year').innerHTML+=`<option value="${i}" ${i===yr?'selected':''}>${i}年</option>`;
   for(let i=0;i<12;i++) $('#mp-month').innerHTML+=`<option value="${i}" ${i===mo?'selected':''}>${i+1}月</option>`;
   $('#month-picker').classList.remove('hidden');
 };
 $('#mp-cancel').onclick=()=>$('#month-picker').classList.add('hidden');
-$('#mp-ok').onclick=()=>{
-  const y=Number($('#mp-year').value), m=Number($('#mp-month').value);
-  viewMonth=new Date(y,m,1); renderCalendar(); $('#month-picker').classList.add('hidden');
-};
+$('#mp-ok').onclick=()=>{ const y=Number($('#mp-year').value), m=Number($('#mp-month').value);
+  viewMonth=new Date(y,m,1); renderCalendar(); $('#month-picker').classList.add('hidden'); };
 $('#month-picker').onclick=(e)=>{ if(e.target.id==='month-picker') $('#month-picker').classList.add('hidden'); };
+$('#fab-add').onclick=()=>{ openModal(fmtDate(new Date()), 9); };
 
-// 浮动 +
-$('#fab-add').onclick=()=>{
-  // 默认添加今天
-  openModal(fmtDate(new Date()), 9);
-};
-
-// 周视图导航
+// ---------- 周/日程导航 ----------
 $('#range-start').onchange=()=>{ const v=$('#range-start').value; if(v){ rangeStart=new Date(v+'T00:00:00'); renderCalendar(); renderFree(); } };
 $('#range-days').onchange=()=>{ rangeDays=Number($('#range-days').value); renderCalendar(); renderFree(); };
 $('#wk-prev').onclick=()=>{ rangeStart.setDate(rangeStart.getDate()-rangeDays); $('#range-start').value=fmtDate(rangeStart); renderCalendar(); renderFree(); };
 $('#wk-next').onclick=()=>{ rangeStart.setDate(rangeStart.getDate()+rangeDays); $('#range-start').value=fmtDate(rangeStart); renderCalendar(); renderFree(); };
 $('#wk-today').onclick=()=>{ rangeStart=new Date(); rangeStart.setHours(0,0,0,0); $('#range-start').value=fmtDate(rangeStart); renderCalendar(); renderFree(); };
-// 日程视图导航
 $('#ag-prev').onclick=()=>{ rangeStart.setDate(rangeStart.getDate()-rangeDays); $('#range-start').value=fmtDate(rangeStart); renderCalendar(); renderAgenda(); renderFree(); };
 $('#ag-next').onclick=()=>{ rangeStart.setDate(rangeStart.getDate()+rangeDays); $('#range-start').value=fmtDate(rangeStart); renderCalendar(); renderAgenda(); renderFree(); };
 $('#ag-today').onclick=()=>{ rangeStart=new Date(); rangeStart.setHours(0,0,0,0); $('#range-start').value=fmtDate(rangeStart); renderCalendar(); renderAgenda(); renderFree(); };
-
 $('#modal').onclick=(e)=>{ if(e.target.id==='modal') closeModal(); };
 
 // ---------- .ics 导出 ----------
@@ -480,7 +516,7 @@ function genIcs(){
   const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//MeetScheduler//CN','CALSCALE:GREGORIAN'];
   let n=0;
   for(const ev of room.events){
-    const mine=(ev.owner===myPid&&ev.kind==='busy')||
+    const mine=(ev.owner===myPid&&ev.kind==='busy'&&ev.confirm==='confirmed')||
       (ev.kind==='invite'&&ev.status==='accepted'&&(ev.owner===myPid||ev.inviteTo===myPid||ev.inviteTo==='all'));
     if(!mine) continue; n++;
     lines.push('BEGIN:VEVENT');
@@ -504,6 +540,7 @@ $('#btn-search').onclick=()=>toast('搜索功能开发中…');
 $('#btn-more').onclick=()=>toast('更多人/导出/帮助等功能稍后添加');
 
 // ---------- 启动 ----------
+buildMonthlyOptions();
 (function init(){
   const params=new URLSearchParams(location.search); const id=params.get('room');
   if(id){ enterRoom(id); switchView('month'); } else showHome();
