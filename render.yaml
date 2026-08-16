@@ -6,7 +6,7 @@ services:
     name: meet-scheduler
     runtime: node
     plan: free
-    region: oregon
+    region: singapore
     buildCommand: npm install
     startCommand: node server.js
     envVars:
