@@ -1,0 +1,15 @@
+# 一键部署到 Render（免费，无需信用卡）
+# 用法：把整个 scheduler-app 文件夹推到 GitHub，
+# 在 https://render.com 新建 "Blueprint" 并关联该仓库即可。
+services:
+  - type: web
+    name: meet-scheduler
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 10000
+    healthCheckPath: /

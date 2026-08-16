@@ -1,0 +1,13 @@
+{
+  "name": "meet-scheduler",
+  "version": "1.0.0",
+  "description": "共享空闲时间 + 互相预约的专属日程应用",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2"
+  }
+}

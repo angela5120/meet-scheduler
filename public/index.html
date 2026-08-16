@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MeetScheduler · 共享日历</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 首页 -->
+  <section id="home" class="screen">
+    <div class="card home-card">
+      <h1>📅 共享日历</h1>
+      <p class="sub">建一个房间，把链接发给朋友。你们各自用<strong>自己的颜色</strong>在日历上添加日程；可以切换「只看我 / 只看他 / 同步显示」，一眼看清谁有空谁忙。还能发起<strong>邀请事件</strong>，对方同意就成行。</p>
+      <div class="tabs">
+        <button class="tab active" data-tab="create">创建日历</button>
+        <button class="tab" data-tab="join">加入日历</button>
+      </div>
+      <div id="tab-create" class="tab-pane">
+        <input id="create-title" placeholder="给这个日历起个名字，如「周末计划」" maxlength="60" />
+        <button id="btn-create" class="primary">创建并生成链接</button>
+      </div>
+      <div id="tab-join" class="tab-pane hidden">
+        <input id="join-id" placeholder="输入房间号，如 AB3K9P" maxlength="6" style="text-transform:uppercase" />
+        <button id="btn-join" class="primary">进入日历</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 日历页 -->
+  <section id="room" class="screen hidden">
+    <header class="room-head">
+      <div>
+        <h2 id="room-title">日历</h2>
+        <div class="share-row">
+          <input id="share-link" readonly />
+          <button id="btn-copy" class="ghost">复制链接</button>
+        </div>
+      </div>
+      <div class="me-box">
+        <span id="me-name-label">我是：</span>
+        <span id="me-name" class="me-chip">—</span>
+        <button id="btn-leave" class="ghost small">退出重进</button>
+      </div>
+    </header>
+
+    <div id="name-prompt" class="card hidden">
+      <h3>先告诉我你的名字（会分配一个专属颜色）</h3>
+      <input id="name-input" placeholder="如 小明 / Alex" maxlength="24" />
+      <button id="btn-setname" class="primary">进入</button>
+    </div>
+
+    <!-- 日期范围 + 时区 + 人员显隐 -->
+    <div class="toolbar">
+      <div class="week-nav">
+        <button class="ghost small" id="wk-prev">‹</button>
+        <input type="date" id="range-start" title="起始日期" />
+        <select id="range-days" title="天数">
+          <option value="7">7天</option>
+          <option value="14">14天</option>
+          <option value="30">30天</option>
+        </select>
+        <button class="ghost small" id="wk-next">›</button>
+        <button class="ghost small" id="wk-today">今天</button>
+        <span id="week-label" class="week-label"></span>
+      </div>
+      <div class="toolbar-right">
+        <select id="room-tz" title="时区"></select>
+        <button class="ghost small" id="btn-ics">⬇ 导出.ics</button>
+        <div id="people-toggles" class="people-toggles"></div>
+      </div>
+    </div>
+
+    <div class="cal-wrap">
+      <div id="calendar" class="calendar"></div>
+    </div>
+
+    <div class="two-col">
+      <div>
+        <h3 class="section-title">🟢 大家都有空的时段（已显示的人）</h3>
+        <div id="free-list" class="free-list"></div>
+      </div>
+      <div>
+        <h3 class="section-title">🤝 待回应的邀请</h3>
+        <div id="invites" class="invites"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 添加/编辑事件弹窗 -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <h3 id="modal-title">添加日程</h3>
+      <label>标题<input id="ev-title" placeholder="如 工作 / 游泳" maxlength="40" /></label>
+      <label>日期<input id="ev-date" type="date" /></label>
+      <div class="row">
+        <label>开始<input id="ev-start" type="time" value="09:00" /></label>
+        <label>结束<input id="ev-end" type="time" value="10:00" /></label>
+      </div>
+      <label>作为邀请发给
+        <select id="ev-invite">
+          <option value="">不邀请（仅自己可见的日程）</option>
+        </select>
+      </label>
+      <div id="modal-actions" class="modal-actions">
+        <button class="ghost" id="ev-cancel">取消</button>
+        <button class="primary" id="ev-save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="app.js"></script>
+</body>
+</html>
