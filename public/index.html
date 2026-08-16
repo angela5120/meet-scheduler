@@ -10,8 +10,8 @@
   <!-- ============ 首页 ============ -->
   <section id="home" class="screen">
     <div class="card home-card">
-      <h1>📅 共享日历</h1>
-      <p class="sub">建一个房间，把链接发给朋友。你们各自用<strong>自己的颜色</strong>在日历上添加日程；可以切换「只看我 / 只看他 / 同步显示」，一眼看清谁有空谁忙。还能发起<strong>邀请事件</strong>，对方同意就成行。</p>
+      <h1>📅 calendar</h1>
+      <p class="sub">添加各自日程</p>
       <div class="tabs">
         <button class="tab active" data-tab="create">创建日历</button>
         <button class="tab" data-tab="join">加入日历</button>
@@ -131,8 +131,12 @@
         <div id="invites" class="invites"></div>
       </div>
       <div>
-        <h3 class="section-title">🟢 大家都有空的时段</h3>
-        <div id="free-list" class="free-list"></div>
+        <button type="button" class="section-toggle" id="btn-toggle-free" aria-expanded="false">
+          <span class="st-icon">🟢</span>
+          <span class="st-text">大家都有空的时段</span>
+          <span class="st-arrow">▾</span>
+        </button>
+        <div id="free-list" class="free-list" hidden></div>
       </div>
     </div>
   </section>
@@ -173,10 +177,26 @@
         </div>
         <select id="ev-monthly" class="hidden"></select>
       </label>
-      <label>作为邀请发给
-        <select id="ev-invite">
-          <option value="">不邀请（仅自己可见的日程）</option>
-        </select>
+      <label>行程类型
+        <div class="vis-opts" id="ev-vis-opts">
+          <label class="vis-opt on" data-vis="public">
+            <input type="radio" name="ev-vis" value="public" checked />
+            <div class="vo-body">
+              <span class="vo-t">👥 所有人可见</span>
+              <span class="vo-h">公开日程，房间里的所有人立刻看到。</span>
+            </div>
+          </label>
+          <label class="vis-opt" data-vis="invite">
+            <input type="radio" name="ev-vis" value="invite" />
+            <div class="vo-body">
+              <span class="vo-t">✉️ 邀请特定人</span>
+              <span class="vo-h">需要对方同意后才生效，未回应前是虚线框。</span>
+            </div>
+          </label>
+        </div>
+      </label>
+      <label id="ev-invite-row" class="hidden">发给
+        <select id="ev-invite"></select>
       </label>
       <div id="modal-actions" class="modal-actions">
         <button class="ghost" id="ev-cancel">取消</button>
