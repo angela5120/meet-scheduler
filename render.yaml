@@ -8,6 +8,7 @@ databases:
     databaseName: scheduler
     user: scheduler_user
     plan: free
+    region: oregon
     postgresMajorVersion: 16
 
 services:
@@ -15,7 +16,7 @@ services:
     name: meet-scheduler
     runtime: node
     plan: free
-    region: singapore
+    region: oregon
     buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /
