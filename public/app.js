@@ -357,7 +357,11 @@ function renderPeople(){
   for(const p of Object.values(room.participants)){
     const off=!visible.has(p.pid)?' off':'';
     const sw=shadeSet(p.hue)[0].bg;
-    parts += `<span class="ptoggle${off}" data-pid="${p.pid}"><i class="sw" style="background:${sw}"></i>${escapeHtml(p.name)}</span>`;
+    const isMe = (p.pid === myPid);
+    const delBtn = isMe
+      ? `<i class="pt-del" title="删除这个身份（含其名下全部日程）" data-pid="${p.pid}">✕</i>`
+      : '';
+    parts += `<span class="ptoggle${off}${isMe?' is-me':''}" data-pid="${p.pid}"><i class="sw" style="background:${sw}"></i>${escapeHtml(p.name)}${delBtn}</span>`;
   }
   const html = src+parts;
   $('#people-toggles').innerHTML = html;
@@ -366,8 +370,32 @@ function renderPeople(){
     const box=$(sel); if(!box) return;
     box.querySelector('#only-me')?.addEventListener('click',()=>{ if(myPid){ visible=new Set([myPid]); render(); } });
     box.querySelector('#only-all')?.addEventListener('click',()=>{ visible=new Set(Object.keys(room.participants)); render(); });
-    box.querySelectorAll('.ptoggle').forEach(el=>el.addEventListener('click',()=>{
+    box.querySelectorAll('.ptoggle').forEach(el=>el.addEventListener('click',(e)=>{
+      // 点删除按钮时不要切换可见
+      if(e.target.classList.contains('pt-del')) return;
       const pid=el.dataset.pid; if(visible.has(pid)) visible.delete(pid); else visible.add(pid); render();
+    }));
+    box.querySelectorAll('.pt-del').forEach(el=>el.addEventListener('click',async(e)=>{
+      e.stopPropagation();
+      const pid=el.dataset.pid;
+      const pname = room.participants[pid]?.name || '这个身份';
+      if(!confirm(`确定删除「${pname}」及其名下所有日程吗？\n此操作不可恢复。`)) return;
+      try{
+        await fetch(`/api/rooms/${roomId}/participants/${pid}`,{
+          method:'DELETE',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({requester:pid})
+        }).then(r=>{ if(!r.ok) return r.json().then(d=>{throw new Error(d.error||'删除失败');}); return r.json(); });
+        // 清掉本地身份
+        if(myPid===pid){ localStorage.removeItem('ms_pid_'+roomId); myPid=null; }
+        room=await api.getRoom(roomId);
+        visible=new Set(Object.keys(room.participants));
+        render();
+        toast(`已删除「${pname}」`);
+        if(pid===myPid||!myPid) setTimeout(()=>location.reload(), 800);
+      }catch(err){
+        toast('删除失败：'+err.message);
+      }
     }));
   });
 }
