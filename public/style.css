@@ -171,14 +171,43 @@ button { cursor: pointer; font-size: 15px; border-radius: 10px; border: 1px soli
 
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1f2933; color: #fff; padding: 12px 20px; border-radius: 10px; font-size: 14px; box-shadow: var(--shadow); z-index: 99; }
 
-/* 响应式：移动端窄屏月份导航按钮隐藏一些 */
+/* ========== 响应式：移动端（像手机原生日历） ========== */
+@media (max-width: 760px) {
+  .room-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .share-row { max-width: none; }
+  .me-box { justify-content: space-between; }
+}
 @media (max-width: 640px) {
-  .screen { padding: 8px; }
+  .screen { padding: 10px 12px 90px; }
   .cal-title { font-size: 22px; }
-  .month-grid { grid-auto-rows: minmax(86px, 1fr); }
+  .month-grid { grid-auto-rows: minmax(84px, 1fr); }
   .mcell { padding: 4px 4px 6px; }
   .mcell-day { font-size: 15px; }
   .tag { font-size: 11px; padding: 2px 5px; }
   .tag .tag-c { display: none; }
-  .fab { right: 16px; bottom: 80px; }
+  .fab { right: 16px; bottom: 84px; width: 52px; height: 52px; font-size: 26px; }
+}
+@media (max-width: 480px) {
+  .screen { padding: 8px 8px 92px; }
+  h1 { font-size: 22px; }
+  .home-card { padding: 24px 18px; margin-top: 5vh; }
+  .cal-top { padding: 8px 0 2px; }
+  .cal-title { font-size: 19px; letter-spacing: 0; }
+  .view-tabs { gap: 10px; padding: 6px 0 10px; }
+  .view-tab { font-size: 15px; }
+  .month-weekdays { font-size: 11px; padding: 4px 0; }
+  .month-grid { grid-auto-rows: minmax(72px, 1fr); border-radius: 10px; }
+  .mcell { padding: 3px 3px 4px; min-height: 72px; gap: 2px; }
+  .mcell-day { font-size: 14px; }
+  .mcell.today .mcell-day { width: 23px; height: 23px; font-size: 12px; }
+  .mcell-tags { gap: 2px; margin-top: 1px; }
+  .tag { padding: 2px 5px; font-size: 10.5px; border-radius: 5px; }
+  .tag .tag-t { font-size: 10.5px; }
+  .tag-more { font-size: 10px; padding: 1px 5px; }
+  .fab { right: 14px; bottom: 80px; }
+  .modal { padding: 0; align-items: flex-end; justify-content: center; }
+  .modal-card { max-width: none; border-radius: 18px 18px 0 0; padding: 20px 18px 30px; }
+  .free-chip { font-size: 12.5px; padding: 7px 10px; }
+  .section-toggle { font-size: 15px; }
+  .inv { padding: 10px 12px; }
 }
