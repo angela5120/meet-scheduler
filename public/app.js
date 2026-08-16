@@ -412,10 +412,44 @@ function openModal(date, startHour, ev){
   $('#ev-date').value=ev?ev.date:date;
   $('#ev-start').value=ev?ev.start:(pad(startHour||9)+':00');
   $('#ev-end').value=ev?ev.end:(pad(Math.min((startHour||9)+1,HOUR_END))+':00');
-  // 邀请对象
-  const sel=$('#ev-invite'); sel.innerHTML='<option value="">不邀请（仅自己可见的日程）</option><option value="all">所有人</option>';
-  for(const p of Object.values(room.participants)) if(p.pid!==myPid) sel.innerHTML+=`<option value="${p.pid}">${escapeHtml(p.name)}</option>`;
-  sel.value=ev?(ev.inviteTo||''):''; sel.disabled=!!ev;
+
+  // 行程类型（两种）：所有人可见 / 邀请特定人
+  // 编辑旧邀请事件时回填；编辑普通事件/新建 默认"所有人可见"
+  let curVis = 'public';
+  const radios = $('#ev-vis-opts').querySelectorAll('input[name=ev-vis]');
+  if (ev && isInvite) {
+    curVis = 'invite';
+  } else if (ev && ev.inviteTo === 'all') {
+    // 兼容老数据：之前选过"所有人"——现在归并到"所有人可见"
+    curVis = 'public';
+  }
+  radios.forEach(r => r.checked = (r.value === curVis));
+  $('#ev-vis-opts').querySelectorAll('.vis-opt').forEach(o => o.classList.toggle('on', o.dataset.vis === curVis));
+
+  // 邀请目标人下拉：仅 curVis === 'invite' 时显示；填入除了自己之外的所有参与者
+  const sel = $('#ev-invite');
+  sel.innerHTML = '';
+  for (const p of Object.values(room.participants)) {
+    if (p.pid !== myPid) sel.innerHTML += `<option value="${p.pid}">${escapeHtml(p.name)}</option>`;
+  }
+  if (isInvite && ev.inviteTo && ev.inviteTo !== 'all') {
+    // 若该人还在列表里就选中；不在则自动追加并选中
+    if (![...sel.options].some(o => o.value === ev.inviteTo)) {
+      const tp = room.participants[ev.inviteTo];
+      if (tp) sel.innerHTML += `<option value="${tp.pid}">${escapeHtml(tp.name)}</option>`;
+    }
+    sel.value = ev.inviteTo;
+  } else if (sel.options.length > 0) {
+    sel.value = sel.options[0].value;
+  }
+  const updateInviteRow = () => {
+    const v = [...radios].find(r => r.checked)?.value || 'public';
+    $('#ev-vis-opts').querySelectorAll('.vis-opt').forEach(o => o.classList.toggle('on', o.dataset.vis === v));
+    $('#ev-invite-row').classList.toggle('hidden', v !== 'invite');
+  };
+  $('#ev-vis-opts').querySelectorAll('input[name=ev-vis]').forEach(r => r.addEventListener('change', updateInviteRow));
+  updateInviteRow();
+
   // 状态（仅普通日程显示；邀请由回应决定）
   const confirmWrap=$('#ev-confirm-wrap');
   if(confirmWrap) confirmWrap.classList.toggle('hidden', isInvite);
@@ -467,9 +501,17 @@ async function saveEvent(){
   if(!myPid){ toast('请先填写名字'); return; }
   const title=$('#ev-title').value.trim()||'日程';
   const date=$('#ev-date').value, start=$('#ev-start').value, end=$('#ev-end').value;
-  const inviteTo=$('#ev-invite').value||null;
+  // 行程类型：所有人可见 → 不邀请（inviteTo=null）；邀请特定人 → 选中的 pid
+  const visRadios = $('#ev-vis-opts').querySelectorAll('input[name=ev-vis]');
+  const vis = [...visRadios].find(r => r.checked)?.value || 'public';
+  let inviteTo = null;
+  if (vis === 'invite') {
+    inviteTo = $('#ev-invite').value || null;
+    if (!inviteTo) return toast('请选择邀请对象');
+  }
   if(start>=end) return toast('结束时间必须晚于开始');
   const repeat=readRepeat();
+  // 编辑已有事件时也要带 inviteTo（即使是 null，让后端能区分"清空邀请"和"未改"）
   const payload={ pid:myPid, title, date, start, end, inviteTo, shade:curShade, confirm:curConfirm, repeat };
   try{
     if(editingId){ room=await api.updateEvent(roomId,editingId,payload); }
@@ -538,6 +580,18 @@ $('#btn-ics').onclick=genIcs;
 $('#btn-ics-2').onclick=genIcs;
 $('#btn-search').onclick=()=>toast('搜索功能开发中…');
 $('#btn-more').onclick=()=>toast('更多人/导出/帮助等功能稍后添加');
+
+// ---------- 折叠「大家都有空的时段」 ----------
+const freeToggle=$('#btn-toggle-free');
+const freeBox=$('#free-list');
+if(freeToggle){
+  freeToggle.addEventListener('click',()=>{
+    const open=freeBox.hidden;
+    freeBox.hidden=!open;
+    freeToggle.setAttribute('aria-expanded', String(open));
+    freeToggle.classList.toggle('open', open);
+  });
+}
 
 // ---------- 启动 ----------
 buildMonthlyOptions();
