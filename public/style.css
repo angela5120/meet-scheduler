@@ -127,6 +127,19 @@ button { cursor: pointer; font-size: 15px; border-radius: 10px; border: 1px soli
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 26px; }
 @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
 .section-title { font-size: 16px; margin: 0 0 10px; }
+/* 可折叠的「大家都有空的时段」 */
+.section-toggle {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 4px 0; margin: 0 0 10px;
+  background: none; border: none; cursor: pointer;
+  font-size: 16px; font-weight: 700; color: var(--text);
+  text-align: left;
+}
+.section-toggle .st-icon { font-size: 15px; }
+.section-toggle .st-text { flex: 1; }
+.section-toggle .st-arrow { transition: transform .18s ease; color: var(--muted); font-size: 13px; }
+.section-toggle.open .st-arrow { transform: rotate(180deg); }
+.free-list[hidden] { display: none; }
 .free-list { display: flex; flex-direction: column; gap: 6px; }
 .free-chip { background: #f0fdf4; border: 1px solid #bbf7d0; color: #14532d; padding: 8px 12px; border-radius: 10px; font-size: 13.5px; }
 .af-empty { color: var(--muted); font-size: 14px; }
@@ -145,6 +158,16 @@ button { cursor: pointer; font-size: 15px; border-radius: 10px; border: 1px soli
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
 .mp-body { display: flex; gap: 10px; }
 .mp-body select { flex: 1; }
+
+/* 行程类型 两选一卡片 */
+.vis-opts { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.vis-opt { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 10px; cursor: pointer; background: #fff; transition: border-color .15s, background .15s; }
+.vis-opt:hover { border-color: var(--brand); }
+.vis-opt.on { border-color: var(--brand); background: #eff6ff; }
+.vis-opt input[type=radio] { width: 18px; height: 18px; margin: 3px 0 0 0; accent-color: var(--brand); cursor: pointer; flex-shrink: 0; }
+.vis-opt .vo-body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.vis-opt .vo-t { font-size: 15px; font-weight: 600; color: var(--ink); }
+.vis-opt .vo-h { font-size: 12px; color: var(--muted); line-height: 1.5; }
 
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1f2933; color: #fff; padding: 12px 20px; border-radius: 10px; font-size: 14px; box-shadow: var(--shadow); z-index: 99; }
 
