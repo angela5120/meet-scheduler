@@ -23,13 +23,31 @@ if (USE_DB) {
 let rooms = {};
 let saveTimer = null;
 
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function initDB() {
   if (!pool) return;
-  await pool.query(`CREATE TABLE IF NOT EXISTS rooms (
-    id TEXT PRIMARY KEY,
-    data JSONB NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  )`);
+  // 启动时重试连接：Render 偶尔 web 服务起得比 DNS 广播快（截图显示就是 hostname 还没解析）
+  const maxAttempts = 12; // 约 60s
+  let lastErr = null;
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      const c = await pool.connect();
+      await c.query(`CREATE TABLE IF NOT EXISTS rooms (
+        id TEXT PRIMARY KEY,
+        data JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`);
+      c.release();
+      console.log(`✅ Postgres 已连接（第 ${i}/${maxAttempts} 次尝试）`);
+      return;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`⏳ 数据库尚未就绪（${i}/${maxAttempts}）：${e.code || e.message}`);
+      await sleep(5000);
+    }
+  }
+  throw lastErr || new Error('数据库连接失败');
 }
 
 async function loadRooms() {
@@ -206,7 +224,31 @@ app.put('/api/rooms/:id/events/:eid/respond', (req, res) => {
 });
 
 (async () => {
-  await initDB();
-  await loadRooms();
-  app.listen(PORT, () => console.log(`MeetScheduler 运行在 http://localhost:${PORT}（存储：${USE_DB ? 'Postgres 数据库' : '本地文件'}）`));
+  // 即使数据库暂时连不上，也先把 web 服务起起来（不让 Render 误判 Exited 1）
+  // DB 模式下首次启动若失败：本轮 rooms 为空 + 提示；下次请求会触发新的连接尝试。
+  try {
+    await initDB();
+    await loadRooms();
+  } catch (e) {
+    console.error('❌ 启动时数据库初始化失败，将以「临时内存模式」继续提供服务：', e.message);
+    console.error('   一般是 Render 内网 DNS 尚未解析完成后端 PG hostname，过一会儿刷新即可');
+    rooms = {};
+  }
+  app.listen(PORT, () => {
+    console.log(`MeetScheduler 运行在 http://localhost:${PORT}（存储：${pool ? (Object.keys(rooms).length ? 'Postgres ✅' : 'Postgres ⚠️ 临时内存') : '本地文件'}）`);
+    if (pool) {
+      // 后台静默重试，每 15s 探测一次，连上后立即从数据库加载
+      const retry = async () => {
+        try {
+          const c = await pool.connect(); c.release();
+          await loadRooms();
+          console.log('✅ 数据库已上线，已有数据已加载（共 ' + Object.keys(rooms).length + ' 个房间）');
+          return true;
+        } catch { return false; }
+      };
+      (async function loop() {
+        while (!(await retry())) await sleep(15000);
+      })();
+    }
+  });
 })();
