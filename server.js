@@ -27,8 +27,10 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function initDB() {
   if (!pool) return;
-  // 启动时重试连接：Render 偶尔 web 服务起得比 DNS 广播快（截图显示就是 hostname 还没解析）
-  const maxAttempts = 12; // 约 60s
+  // 启动时重试连接：Render 免费 PG 在 Oregon，web 在 Singapore，跨区域 DNS 可能慢。
+  // 这里给到 5 分钟覆盖最坏情况（5s × 60 次）
+  const maxAttempts = 60;
+  const intervalMs = 5000;
   let lastErr = null;
   for (let i = 1; i <= maxAttempts; i++) {
     try {
@@ -43,8 +45,10 @@ async function initDB() {
       return;
     } catch (e) {
       lastErr = e;
-      console.warn(`⏳ 数据库尚未就绪（${i}/${maxAttempts}）：${e.code || e.message}`);
-      await sleep(5000);
+      if (i === 1 || i % 6 === 0) {
+        console.warn(`⏳ 数据库尚未就绪（${i}/${maxAttempts}）：${e.code || e.message}`);
+      }
+      await sleep(intervalMs);
     }
   }
   throw lastErr || new Error('数据库连接失败');
@@ -146,6 +150,27 @@ app.put('/api/rooms/:id/participants/:pid', (req, res) => {
   scheduleSave(); res.json({ room: r });
 });
 
+// 删除参与者（仅本人可删自己；连带删除其名下所有日程）
+app.delete('/api/rooms/:id/participants/:pid', (req, res) => {
+  const r = rooms[req.params.id]; if (!r) return res.status(404).json({ error: '房间不存在' });
+  const pid = req.params.pid;
+  if (!r.participants[pid]) return res.status(404).json({ error: '参与者不存在' });
+  // 鉴权：URL 里的 pid 必须是本人（用 body 或者 header 都行；这里约定只能用 URL pid 表示"本人删自己"）
+  const requester = (req.body && req.body.requester) || req.headers['x-pid'];
+  if (requester && requester !== pid) return res.status(403).json({ error: '只能删除自己的身份' });
+  // 保留房间至少 1 人（避免空房间）
+  if (Object.keys(r.participants).length <= 1) {
+    return res.status(400).json({ error: '房间至少保留一位参与者' });
+  }
+  // 删除该 pid 名下所有事件（作为 owner 的事件以及其作为被邀请者的 status）
+  const beforeEvents = r.events.length;
+  r.events = r.events.filter(ev => ev.owner !== pid && ev.inviteTo !== pid);
+  const removed = beforeEvents - r.events.length;
+  delete r.participants[pid];
+  scheduleSave();
+  res.json({ room: r, removed });
+});
+
 // 事件：owner 添加自己的日程；inviteTo 非空则为"邀请事件"
 // 字段：shade(0深/1中/2浅) 区分类别，confirm(busy 用：confirmed 实线 / tentative 虚线)，repeat 重复规则
 function parseRepeat(rep) {
@@ -197,6 +222,15 @@ app.put('/api/rooms/:id/events/:eid', (req, res) => {
   if (req.body.shade !== undefined && [0, 1, 2].includes(req.body.shade)) ev.shade = req.body.shade;
   if (req.body.confirm === 'tentative' || req.body.confirm === 'confirmed') ev.confirm = req.body.confirm;
   if (req.body.repeat !== undefined) ev.repeat = parseRepeat(req.body.repeat);
+  // 行程类型变更：清空/设置 inviteTo，同步切换 kind/status
+  // inviteTo=null/空 → 所有人可见（busy+confirmed）；inviteTo=pid → 邀请（invite+pending）
+  if (req.body.inviteTo !== undefined) {
+    const it = req.body.inviteTo || null;
+    if (it && it !== 'all' && !r.participants[it]) return res.status(400).json({ error: '邀请对象不存在' });
+    ev.inviteTo = it;
+    ev.kind = it ? 'invite' : 'busy';
+    ev.status = it ? 'pending' : 'confirmed';
+  }
   scheduleSave(); res.json({ room: r });
 });
 
