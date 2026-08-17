@@ -85,7 +85,13 @@ function displayEventsOn(ds){
       if(ev.repeat.type==='weekly') hit=ev.repeat.days.includes(dow);
       else if(ev.repeat.type==='monthly') hit=(ev.repeat.dom===dom);
       if(hit) out.push({...ev, startDate:ev.date, displayDate:ds, eid:ev.id});
-    } else if(ev.date<=ds && (!ev.endDate || ds<=ev.endDate)){
+    } else if(ev.endDate){
+      // 区间事件：ds 必须在 [ev.date, ev.endDate] 内
+      if(ev.date<=ds && ds<=ev.endDate){
+        out.push({...ev, startDate:ev.date, displayDate:ds, eid:ev.id});
+      }
+    } else if(ev.date===ds){
+      // 单日事件：仅匹配当天
       out.push({...ev, startDate:ev.date, displayDate:ds, eid:ev.id});
     }
   }
