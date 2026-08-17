@@ -84,9 +84,9 @@ function displayEventsOn(ds){
       let hit=false;
       if(ev.repeat.type==='weekly') hit=ev.repeat.days.includes(dow);
       else if(ev.repeat.type==='monthly') hit=(ev.repeat.dom===dom);
-      if(hit) out.push({...ev, date:ds, eid:ev.id});
-    } else if(ev.date===ds){
-      out.push({...ev, eid:ev.id});
+      if(hit) out.push({...ev, startDate:ev.date, displayDate:ds, eid:ev.id});
+    } else if(ev.date<=ds && (!ev.endDate || ds<=ev.endDate)){
+      out.push({...ev, startDate:ev.date, displayDate:ds, eid:ev.id});
     }
   }
   out.sort((a,b)=>toFloat(a.start)-toFloat(b.start));
@@ -230,7 +230,7 @@ function renderMonth(){
     if(isToday) cls.push('today');
     const dayEvents=displayEventsOn(ds);
     let tagsHtml='';
-    const MAX=4;
+    const MAX= window.innerWidth<=480 ? 5 : 4;
     for(let i=0;i<Math.min(MAX,dayEvents.length);i++) tagsHtml += monthTag(dayEvents[i]);
     if(dayEvents.length>MAX) tagsHtml += `<span class="tag-more" data-more="${ds}">+${dayEvents.length-MAX}</span>`;
     html += `<div class="${cls.join(' ')}" data-d="${ds}">
@@ -266,9 +266,17 @@ function monthTag(ev){
   const iAmInvitee = ev.kind==='invite'&&(ev.inviteTo===myPid||ev.inviteTo==='all');
   if(ev.kind==='invite'&&ev.status==='pending'&&iAmInvitee) cls+=' pending-me';
   if(ev.kind==='invite'&&ev.status==='accepted') cls+=' accepted-ring';
+  // 连续多天：标记首尾，给标签加上连接样式
+  const isMulti = ev.endDate && ev.endDate!==ev.startDate;
+  let md='';
+  if(isMulti){
+    if(ev.displayDate===ev.startDate){ cls+=' md-start'; md=' →'; }
+    else if(ev.displayDate===ev.endDate){ cls+=' md-end'; }
+    else cls+=' md-mid';
+  }
   const mark = ev.kind==='invite'?(ev.status==='accepted'?' ✓':'(待回应)'):(isTent?' ·待定':'');
   return `<div class="${cls}" data-id="${ev.eid||ev.id}" style="background:${bg};border:${bd};color:${sh.text}">
-    <span class="tag-t">${escapeHtml(ev.title)}${mark}</span><span class="tag-c">${ev.start}</span></div>`;
+    <span class="tag-t">${escapeHtml(ev.title)}${md}${mark}</span><span class="tag-c">${ev.start}</span></div>`;
 }
 
 // ---------- 周视图（时间轴）----------
@@ -311,6 +319,12 @@ function eventBlock(ev,top,hgt){
   const bd = isSolid(ev) ? `1px solid ${sh.border}` : `1.5px dashed ${sh.border}`;
   let cls='event';
   if(!isSolid(ev)) cls+=' dash';
+  const isMulti = ev.endDate && ev.endDate!==ev.startDate;
+  if(isMulti){
+    if(ev.displayDate===ev.startDate) cls+=' md-start';
+    else if(ev.displayDate===ev.endDate) cls+=' md-end';
+    else cls+=' md-mid';
+  }
   const iAmInvitee=ev.kind==='invite'&&(ev.inviteTo===myPid||ev.inviteTo==='all');
   if(ev.kind==='invite'&&ev.status==='pending'&&iAmInvitee) cls+=' pending-me';
   if(ev.kind==='invite'&&ev.status==='accepted') cls+=' accepted-ring';
@@ -335,12 +349,15 @@ function renderAgenda(){
     any=true;
     list.innerHTML += `<div class="agenda-day">${d.slice(5)} <span class="sub">${weekdayShort(d)}</span></div>`;
     for(const ev of evs){
+      // 连续多天事件：只在起始那天显示一次，避免每天重复
+      if(ev.endDate && ev.endDate!==ev.startDate && ev.displayDate!==ev.startDate) continue;
       const sh=evShade(ev);
       const mark = ev.kind==='invite'?(ev.status==='accepted'?' ✓邀请':' ⟳邀请(待回应)'):(ev.confirm==='tentative'?' ·待定':'');
+      const range = (ev.endDate && ev.endDate!==ev.startDate) ? ` <span class="ag-range">${ev.startDate.slice(5)}–${ev.endDate.slice(5)}</span>` : '';
       list.innerHTML += `<div class="agenda-item" data-id="${ev.eid||ev.id}">
         <span class="agenda-dot" style="background:${sh.bg}"></span>
         <span class="agenda-time">${ev.start}–${ev.end}</span>
-        <span class="agenda-tit" style="color:${sh.text}">${escapeHtml(ev.title)}${mark}</span>
+        <span class="agenda-tit" style="color:${sh.text}">${escapeHtml(ev.title)}${range}${mark}</span>
         <span class="agenda-meta">${escapeHtml(ev.ownerName)}</span></div>`;
     }
   }
@@ -451,6 +468,7 @@ function openModal(date, startHour, ev){
   $('#modal-title').textContent=ev?'编辑日程':'添加日程';
   $('#ev-title').value=ev?ev.title:'';
   $('#ev-date').value=ev?ev.date:date;
+  $('#ev-date-end').value=ev?(ev.endDate||''):'';
   $('#ev-start').value=ev?ev.start:(pad(startHour||9)+':00');
   $('#ev-end').value=ev?ev.end:(pad(Math.min((startHour||9)+1,HOUR_END))+':00');
 
@@ -544,6 +562,8 @@ async function saveEvent(){
   // 日期/时间兜底：手机上若被清空或格式异常，给默认值，避免后端返回「日期非法/时间非法」
   let date=$('#ev-date').value;
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) date=fmtDate(new Date());
+  let endDate=$('#ev-date-end').value.trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(endDate) || endDate < date) endDate=null; // 留空或早于开始 → 单日
   let start=$('#ev-start').value || '09:00';
   let end=$('#ev-end').value || '10:00';
   // 行程类型：所有人可见 → 不邀请（inviteTo=null）；邀请特定人 → 选中的 pid
@@ -557,7 +577,7 @@ async function saveEvent(){
   if(start>=end) return toast('结束时间必须晚于开始');
   const repeat=readRepeat();
   // 编辑已有事件时也要带 inviteTo（即使是 null，让后端能区分"清空邀请"和"未改"）
-  const payload={ pid:myPid, title, date, start, end, inviteTo, shade:curShade, confirm:curConfirm, repeat };
+  const payload={ pid:myPid, title, date, endDate, start, end, inviteTo, shade:curShade, confirm:curConfirm, repeat };
   const doSave = () => editingId ? api.updateEvent(roomId,editingId,payload) : api.addEvent(roomId,payload);
   try{
     // 网络抖动时自动重试一次
@@ -614,8 +634,9 @@ function genIcs(){
     if(!mine) continue; n++;
     lines.push('BEGIN:VEVENT');
     lines.push('UID:'+ev.id+'@meetscheduler');
+    const icsEnd = ev.endDate || ev.date;
     lines.push('DTSTART:'+ev.date.replace(/-/g,'')+'T'+ev.start.replace(':','')+'00');
-    lines.push('DTEND:'+ev.date.replace(/-/g,'')+'T'+ev.end.replace(':','')+'00');
+    lines.push('DTEND:'+icsEnd.replace(/-/g,'')+'T'+ev.end.replace(':','')+'00');
     lines.push('SUMMARY:'+(ev.kind==='invite'?'邀请: ':'')+ev.title);
     lines.push('END:VEVENT');
   }
