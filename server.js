@@ -192,6 +192,9 @@ app.post('/api/rooms/:id/events', (req, res) => {
   if (!validTime(start) || !validTime(end) || start >= end) return res.status(400).json({ error: '时间非法' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '日期非法' });
   if (inviteTo && inviteTo !== 'all' && !r.participants[inviteTo]) return res.status(400).json({ error: '邀请对象不存在' });
+  // 连续多天：endDate 合法且 >= 开始日期 才保存，否则视为单日
+  let endDate = null;
+  if (req.body.endDate && /^\d{4}-\d{2}-\d{2}$/.test(req.body.endDate) && req.body.endDate >= date) endDate = req.body.endDate;
   const shade = [0, 1, 2].includes(req.body.shade) ? req.body.shade : 1;
   const confirm = req.body.confirm === 'tentative' ? 'tentative' : 'confirmed';
   const repeat = parseRepeat(req.body.repeat);
@@ -199,7 +202,7 @@ app.post('/api/rooms/:id/events', (req, res) => {
   const ev = {
     id: eid, owner: pid, ownerName: p.name, hue: p.hue,
     title: (title || '日程').toString().slice(0, 40),
-    date, start, end,
+    date, endDate, start, end,
     kind: inviteTo ? 'invite' : 'busy',
     inviteTo: inviteTo || null,
     status: inviteTo ? 'pending' : 'confirmed',
@@ -216,6 +219,11 @@ app.put('/api/rooms/:id/events/:eid', (req, res) => {
   if (ev.owner !== pid) return res.status(403).json({ error: '只能修改自己的日程' });
   if (title !== undefined) ev.title = title.toString().slice(0, 40);
   if (date !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(date)) ev.date = date;
+  // 连续多天：endDate 变更（为空/非法/早于开始 → 置 null，即回到单日）
+  if (req.body.endDate !== undefined) {
+    if (req.body.endDate && /^\d{4}-\d{2}-\d{2}$/.test(req.body.endDate) && req.body.endDate >= ev.date) ev.endDate = req.body.endDate;
+    else ev.endDate = null;
+  }
   if (start !== undefined && validTime(start)) ev.start = start;
   if (end !== undefined && validTime(end)) ev.end = end;
   if (ev.start >= ev.end) return res.status(400).json({ error: '结束时间必须晚于开始' });
