@@ -71,6 +71,14 @@ button { cursor: pointer; font-size: 15px; border-radius: 10px; border: 1px soli
 .tag.accepted { box-shadow: inset 0 0 0 1.5px #16a34a; }
 .tag.pending-me { box-shadow: inset 0 0 0 2px #f59e0b; }
 .tag-more { font-size: 11.5px; color: var(--muted); background: #f1f5f9; border-radius: 6px; padding: 2px 7px; align-self: flex-start; cursor: pointer; }
+/* 连续多天：相邻日期的标签连成一条（首/中/尾圆角不同） */
+.tag.md-start { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.tag.md-mid   { border-radius: 0; }
+.tag.md-end   { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.event.md-start { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.event.md-mid   { border-radius: 0; }
+.event.md-end   { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.ag-range { font-size: 11px; color: var(--muted); font-weight: 600; }
 
 /* 浮动 + */
 .fab { position: fixed; right: 28px; bottom: 28px; width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--brand); color: #fff; font-size: 30px; line-height: 1; box-shadow: 0 8px 24px rgba(59,130,246,.45); cursor: pointer; z-index: 5; display: flex; align-items: center; justify-content: center; }
@@ -207,14 +215,15 @@ button { cursor: pointer; font-size: 15px; border-radius: 10px; border: 1px soli
   .view-tabs { gap: 10px; padding: 6px 0 10px; }
   .view-tab { font-size: 15px; }
   .month-weekdays { font-size: 11px; padding: 4px 0; }
-  .month-grid { grid-auto-rows: minmax(72px, 1fr); border-radius: 10px; }
-  .mcell { padding: 3px 3px 4px; min-height: 72px; gap: 2px; }
+  .month-grid { grid-auto-rows: minmax(98px, 1fr); border-radius: 10px; }
+  .mcell { padding: 3px 3px 4px; min-height: 98px; gap: 2px; }
   .mcell-day { font-size: 14px; }
   .mcell.today .mcell-day { width: 23px; height: 23px; font-size: 12px; }
   .mcell-tags { gap: 2px; margin-top: 1px; }
   .tag { padding: 2px 5px; font-size: 10.5px; border-radius: 5px; }
-  .tag .tag-t { font-size: 10.5px; }
+  .tag .tag-t { font-size: 10.5px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2; }
   .tag-more { font-size: 10px; padding: 1px 5px; }
+  .event .ev-t { white-space: normal; }   /* 周视图事件文字在小屏可换行，不被截断 */
   .fab { right: 14px; bottom: 80px; }
   .modal { padding: 0; align-items: flex-end; justify-content: center; }
   .modal-card { max-width: none; border-radius: 18px 18px 0 0; padding: 20px 18px 30px; }
